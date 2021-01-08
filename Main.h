@@ -8,6 +8,7 @@ using namespace std;
 const int EVT_INCREASE_GRID = 20001;
 const int EVT_DECREASE_GRID = 20000;
 const int EVT_GENERATE_MAZE = 20111;
+const int EVT_SOLVE_MAZE = 22222;
 
 //inheritance makes this class a form 
 class Main : public wxFrame
@@ -30,6 +31,7 @@ private:
 	wxButton* btn_inc = nullptr;
 	wxButton* btn_dec = nullptr;
 	wxButton* btn_start = nullptr;
+	wxButton* btn_solve = nullptr;
 
 	//Maze display
 	wxButton** fieldBtns;
@@ -60,16 +62,36 @@ private:
 	// Completion tracking
 	int topCounter = 0;
 	int previousTop = 0;
-	bool isComplete = false;
+	bool isGenerated = false;
 	bool isCleared = true; // Tracks if maze has been cleared on the field
 
+	// Solver components
+	struct mazeNode // each cell in the maze is a "node" in the solver
+	{
+		bool isObstacle = false;
+		bool beenVisited = false;
+		float globalGoal;
+		float localGoal;
+		int x; //node position in 2d space given by (x,y)
+		int y;
+		vector<mazeNode*> vecNeighbours;
+		mazeNode* parent; //node connecting this node that offers 
+	};
+
+	mazeNode* nodeList = nullptr;
+	mazeNode* startingNode = nullptr;
+	mazeNode* endingNode = nullptr;
+
 	// == Methods == 
-	void OnButtonClicked(wxCommandEvent& evt);
-	void updateGridSize(int oldFieldHeight, int oldFieldWidth, bool isDecreased);
-	void generateMaze(void);
-	void drawToField(int x, int y, int col);
-	void initializeMaze();
-	void drawField();
+	void OnButtonClicked(wxCommandEvent& evt); // main event handler for buttons
+	void updateGridSize(int oldFieldHeight, int oldFieldWidth, bool isDecreased); // rescales maze dimensions
+	void generateMaze(void); // generate new randomized maze
+	void drawToField(int x, int y, int col); // draw maze onto screen
+	void initializeMaze(); // initialize all maze properties
+	void drawField(); // draw on-screen field 
+
+	void initializeSolver(void); // initialize node properties and construct graph
+	void solveMaze(void);
 
 	wxDECLARE_EVENT_TABLE();
 

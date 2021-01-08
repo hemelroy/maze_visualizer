@@ -1,6 +1,7 @@
 #include "Main.h"
 #include <stack>
 #include <thread>
+#include <list>
 
 wxBEGIN_EVENT_TABLE(Main, wxFrame)
 wxEND_EVENT_TABLE()
@@ -21,6 +22,8 @@ Main::Main() : wxFrame(nullptr, wxID_ANY, "Hemel Roy - Maze Visualizer", wxPoint
 	btn_inc->Bind(wxEVT_COMMAND_BUTTON_CLICKED, &Main::OnButtonClicked, this);
 	btn_start = new wxButton(this, EVT_GENERATE_MAZE, "Generate Maze", wxPoint(1050, 150), wxSize(100, 25));
 	btn_start->Bind(wxEVT_COMMAND_BUTTON_CLICKED, &Main::OnButtonClicked, this);
+	btn_solve = new wxButton(this, EVT_SOLVE_MAZE, "Solve Maze", wxPoint(1050, 200), wxSize(100, 25));
+	btn_solve->Bind(wxEVT_COMMAND_BUTTON_CLICKED, &Main::OnButtonClicked, this);
 	
 	//Generate inital maze field skeleton
 	fieldBtns = new wxButton * [fieldWidth * fieldHeight];
@@ -37,16 +40,39 @@ Main::~Main()
 	delete[] leftBorderBtns;
 	delete[] rightBorderBtns;
 	delete[] maze;
+	delete[] nodeList;
 }
 
 //Event handler
 void Main::OnButtonClicked(wxCommandEvent& evt)
 {
 	
-	//Get coordinate of button in field array
-	//int x = (evt.GetId() - 10000) % nFieldWidth;
-	//int y = (evt.GetId() - 10000) / nFieldWidth;
 	int evtID = int(evt.GetId());
+
+	// If it is a field button, get coordinate of button in field array
+	if (evtID < 20000) 
+	{
+		int btnX = (evtID - 10000) % fieldWidth;
+		int btnY = (evtID - 10000) / fieldWidth;
+
+		if (fieldBtns[btnY * fieldWidth + btnX]->GetBackgroundColour() == *wxBLACK)
+		{
+			fieldBtns[btnY * fieldWidth + btnX]->SetForegroundColour(*wxWHITE);
+			fieldBtns[btnY * fieldWidth + btnX]->SetBackgroundColour(*wxWHITE);
+		}
+		else if (fieldBtns[btnY * fieldWidth + btnX]->GetBackgroundColour() == *wxWHITE)
+		{
+			fieldBtns[btnY * fieldWidth + btnX]->SetForegroundColour(*wxBLACK);
+			fieldBtns[btnY * fieldWidth + btnX]->SetBackgroundColour(*wxBLACK);
+		}
+		else
+		{
+			fieldBtns[btnY * fieldWidth + btnX]->SetForegroundColour(*wxWHITE);
+			fieldBtns[btnY * fieldWidth + btnX]->SetBackgroundColour(*wxWHITE);
+		}
+
+		isGenerated = true;
+	}
 
 	switch (evtID)
 	{
@@ -78,14 +104,21 @@ void Main::OnButtonClicked(wxCommandEvent& evt)
 		if (!isCleared)
 			updateGridSize(fieldHeight, fieldWidth, false);
 
-		while (!isComplete)
+		while (!isGenerated)
 		{
 			generateMaze();
-			this_thread::sleep_for(1ms);
+			//this_thread::sleep_for(1ms);
 			wxYield(); //refresh screen
 		}
 		isCleared = false;
 
+		break;
+	case EVT_SOLVE_MAZE:
+		if (isGenerated)
+		{
+			initializeMaze();
+			solveMaze();
+		}
 		break;
 	default:
 		break;
@@ -158,7 +191,7 @@ void Main::initializeMaze()
 	memset(maze, 0x00, mazeWidth * mazeHeight * sizeof(int));
 	topCounter = 0;
 	previousTop = 0;
-	isComplete = false;
+	isGenerated = false;
 
 	// Inital starting point
 	int x = rand() % mazeWidth;
@@ -176,6 +209,7 @@ void Main::drawField()
 		{
 			fieldBtns[y * fieldWidth + x] = new wxButton(this, 10000 + (y * fieldWidth + x), "", wxPoint((MAZE_STARTING_WIDTH + 25) + 25 * x, (MAZE_STARTING_HEIGHT + 25) + 25 * y), wxSize(25, 25));
 			fieldBtns[y * fieldWidth + x]->SetBackgroundColour(*wxBLACK);
+			fieldBtns[y * fieldWidth + x]->Bind(wxEVT_COMMAND_BUTTON_CLICKED, &Main::OnButtonClicked, this);
 		}
 	}
 
@@ -358,10 +392,173 @@ void Main::drawToField(int x, int y, int col)
 			topCounter = 0;
 		if (topCounter >= mazeHeight)
 		{
-			isComplete = true;
+			isGenerated = true;
 			fieldBtns[y * fieldWidth + x]->SetBackgroundColour(*wxWHITE);
 			fieldBtns[y * fieldWidth + x]->SetForegroundColour(*wxWHITE);
 		}
 		previousTop = y * fieldWidth + x;
 	}
+}
+
+void Main::initializeSolver(void)
+{
+	nodeList = new mazeNode[fieldWidth * fieldHeight];
+
+	// initialize nodes, setting coordinates and obstacle nodes
+	for (int x = 0; x < fieldWidth; x++)
+	{
+		for (int y = 0; y < fieldHeight; y++)
+		{
+			nodeList[y * fieldWidth + x].x = x;
+			nodeList[y * fieldWidth + x].y = y;
+
+			if (fieldBtns[y * fieldWidth + x]->GetForegroundColour() == *wxBLACK)
+				nodeList[y * fieldWidth + x].isObstacle = true;
+		}
+	}
+
+	// Create graph connections between nodes
+	for (int x = 0; x < fieldWidth; x++)
+	{
+		for (int y = 0; y < fieldHeight; y++)
+		{
+			// Check edge conditions when creating connections
+			if (y > 0)
+				nodeList[y * fieldWidth + x].vecNeighbours.push_back(&nodeList[(y - 1) * fieldWidth + (x + 0)]);
+			if (y < fieldHeight - 1)
+				nodeList[y * fieldWidth + x].vecNeighbours.push_back(&nodeList[(y + 1) * fieldWidth + (x + 0)]);
+			if (x > 0)
+				nodeList[y * fieldWidth + x].vecNeighbours.push_back(&nodeList[(y + 0) * fieldWidth + (x - 1)]);
+			if (x < fieldWidth - 1)
+				nodeList[y * fieldWidth + x].vecNeighbours.push_back(&nodeList[(y + 0) * fieldWidth + (x + 1)]);
+		}
+	}
+	startingNode = &nodeList[0];
+	endingNode = &nodeList[fieldWidth * fieldHeight - 2];
+
+	// Reset node states
+	for (int x = 0; x < fieldWidth; x++)
+	{
+		for (int y = 0; y < fieldHeight; y++)
+		{
+			nodeList[y * fieldWidth + x].beenVisited = false;
+			nodeList[y * fieldWidth + x].globalGoal = INFINITY;
+			nodeList[y * fieldWidth + x].localGoal = INFINITY;
+			nodeList[y * fieldWidth + x].parent = nullptr;
+		}
+	}
+
+}
+
+void Main::solveMaze(void)
+{
+	initializeSolver();
+
+	// calculates diatance between centerpoints of two nodes
+	auto distance = [](mazeNode* a, mazeNode* b) 
+	{
+		return sqrtf((a->x - b->x) * (a->x - b->x) + (a->y - b->y) * (a->y - b->y));
+	};
+
+	// heuristic is set to be same as distance - can be modified to change bias
+	auto heuristic = [distance](mazeNode* a, mazeNode* b) 
+	{
+		return distance(a, b);
+	};
+
+	//Algorithm start
+
+
+	// Setup starting conditions
+	mazeNode* nodeCurrent = startingNode;
+	startingNode->localGoal = 0.0f;
+	startingNode->globalGoal = heuristic(startingNode, endingNode);
+
+	// Add start node to not tested list - this will ensure it gets tested.
+	// As the algorithm progresses, newly discovered nodes get added to this
+	// list, and will themselves be tested later
+	list<mazeNode*> listNotTestedNodes;
+	listNotTestedNodes.push_back(startingNode);
+
+	// if the not tested list contains nodes, there may be better paths
+		// which have not yet been explored. However, we will also stop 
+		// searching when we reach the target - there may well be better
+		// paths but this one will do - it wont be the longest.
+	while (!listNotTestedNodes.empty() && nodeCurrent != endingNode)// If we want to find absolutely shortest path, change last part to && nodeCurrent != nodeEnd)
+	{
+		// Sort Untested nodes by global goal, so lowest is first
+		listNotTestedNodes.sort([](const mazeNode* lhs, const mazeNode* rhs) { return lhs->globalGoal < rhs->globalGoal; });
+
+		// Front of listNotTestedNodes is potentially the lowest distance node. Our
+			// list may also contain nodes that have been visited, so ditch these...
+		while (!listNotTestedNodes.empty() && listNotTestedNodes.front()->beenVisited)
+			listNotTestedNodes.pop_front();
+		// ...or abort because there are no valid nodes left to test
+		if (listNotTestedNodes.empty())
+			break;
+		nodeCurrent = listNotTestedNodes.front();
+		nodeCurrent->beenVisited = true; // We only explore a node once
+
+		// Check each of this node's neighbours...
+		for (auto nodeNeighbour : nodeCurrent->vecNeighbours)
+		{
+			// ... and only if the neighbour is not visited and is 
+			// not an obstacle, add it to NotTested List
+			if (!nodeNeighbour->beenVisited && nodeNeighbour->isObstacle == 0)
+				listNotTestedNodes.push_back(nodeNeighbour);
+
+			// Calculate the neighbours potential lowest parent distance
+			float fPossiblyLowerGoal = nodeCurrent->localGoal + distance(nodeCurrent, nodeNeighbour);
+
+			// If choosing to path through this node is a lower distance than what 
+			// the neighbour currently has set, update the neighbour to use this node
+			// as the path source, and set its distance scores as necessary
+			if (fPossiblyLowerGoal < nodeNeighbour->localGoal)
+			{
+				nodeNeighbour->parent = nodeCurrent;
+				nodeNeighbour->localGoal = fPossiblyLowerGoal;
+
+				// The best path length to the neighbour being tested has changed, so
+				// update the neighbour's score. The heuristic is used to globally bias
+				// the path algorithm, so it knows if its getting better or worse. At some
+				// point the algo will realise this path is worse and abandon it, and then go
+				// and search along the next best path.
+				nodeNeighbour->globalGoal = nodeNeighbour->localGoal + heuristic(nodeNeighbour, endingNode);
+			}
+		}
+	}
+
+	for (int x = 0; x < fieldWidth; x++)
+	{
+		for (int y = 0; y < fieldHeight; y++)
+		{
+			if (nodeList[y * fieldWidth + x].beenVisited == true)
+				fieldBtns[y * fieldWidth + x]->SetBackgroundColour(*wxCYAN);
+				//fieldBtns[y * fieldWidth + x]->SetBackgroundColour(wxColour(169, 169, 169, 200));
+
+		}
+	}
+
+	if (endingNode != nullptr)
+	{
+		mazeNode* p = endingNode;
+		while (p->parent != nullptr)
+		{
+			fieldBtns[(p->y) * fieldWidth + (p->x)]->SetBackgroundColour(*wxRED);
+
+			// Set next node to this node's parent
+			p = p->parent;
+
+			this_thread::sleep_for(10ms);
+			wxYield();
+		}
+	}
+	fieldBtns[0]->SetBackgroundColour(*wxRED);
+
+	// clear memory
+	mazeNode* oldNodeList = nodeList; 
+	nodeList = nullptr;
+	startingNode = nullptr;
+	endingNode = nullptr;
+	delete[] oldNodeList;
 }
